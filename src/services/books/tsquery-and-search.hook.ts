@@ -3,6 +3,7 @@ import { QueryTypes, Sequelize, Op } from 'sequelize';
 import queryConverter from 'pg-tsquery';
 import { GeneralError } from '@feathersjs/errors';
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const utils = require('feathers-sequelize/lib/utils.js');
 
 export const updateTheTSVector = (options:any) => async (ctx:HookContext)=>{
@@ -80,19 +81,21 @@ export const modifyQueryForSearch = (options:any) => async(ctx:HookContext)=>{
 
   //only bother with this if $select is used and has rank or no select at all (so rank is included by default)
   const selected = filters.$select;
+  console.log('selected', selected);
   if(selected && selected.includes('rank') || !selected){
     // remove the select so we can read it later as an attribute array
     delete ctx.params?.query?.$select;
     // then re-add it as a Sequelize column
-    params.sequelize.attributes = [
-      // add the other selections
-      ...selected.filter((col:string)=>col!='rank'), 
-      // add our rank column
-      [ Sequelize.fn(
-        `ts_rank(${ctx.path}.${options.searchColumn}, to_tsquery`,
-        Sequelize.literal(':query)')), 'rank'
-      ]
+    const rankFunc = [ Sequelize.fn(
+      `ts_rank(${ctx.path}.${options.searchColumn}, to_tsquery`,
+      Sequelize.literal(':query)')), 'rank'
     ];
+    params.sequelize.attributes = selected
+      // if there are selected fields, use the array structure and add our rank column,
+      ? [...selected.filter((col:string)=>col!='rank'), rankFunc]
+      // if there are no selected fields, use the object structure that defaults to include all and then add our rank column
+      : {include: [rankFunc]};
+
 
 
     //only bother with adjusting the sort if rank was used as a column.
