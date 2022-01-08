@@ -1,0 +1,199 @@
+CREATE TABLE author(
+   id SERIAL PRIMARY KEY,
+   name TEXT NOT NULL
+);
+
+CREATE TABLE post(
+   id SERIAL PRIMARY KEY,
+   title TEXT NOT NULL,
+   content TEXT NOT NULL,
+   author_id INT NOT NULL references author(id) 
+);
+
+CREATE TABLE tag(
+   id SERIAL PRIMARY KEY,
+   name TEXT NOT NULL 
+);
+
+CREATE TABLE posts_tags(
+   post_id INT NOT NULL references post(id),
+   tag_id INT NOT NULL references tag(id)
+ );
+
+INSERT INTO author (id, name) 
+VALUES (1, 'Pete Graham'), 
+       (2, 'Rachid Belaid'), 
+       (3, 'Robert Berry');
+
+INSERT INTO tag (id, name) 
+VALUES (1, 'scifi'), 
+       (2, 'politics'), 
+       (3, 'science');
+
+INSERT INTO post (id, title, content, author_id) 
+VALUES (1, 'Endangered species', 
+        'Pandas are an endangered species', 1 ), 
+       (2, 'Freedom of Speech', 
+        'Freedom of speech is a necessary right', 2), 
+       (3, 'Star Wars vs Star Trek', 
+        'Few words from a big fan', 3);
+
+
+INSERT INTO posts_tags (post_id, tag_id) 
+VALUES (1, 3), 
+       (2, 2), 
+       (3, 1);
+       
+       
+       
+SELECT post.title || ' ' || 
+       post.content || ' ' ||
+       author.name || ' ' ||
+       coalesce((string_agg(tag.name, ' ')), '') as document
+FROM post
+JOIN author ON author.id = post.author_id
+JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+JOIN tag ON tag.id = posts_tags.tag_id
+GROUP BY post.id, author.id;
+
+SELECT to_tsvector(post.title) || 
+       to_tsvector(post.content) ||
+       to_tsvector(author.name) ||
+       to_tsvector(coalesce((string_agg(tag.name, ' ')), '')) as document
+FROM post
+JOIN author ON author.id = post.author_id
+JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+JOIN tag ON tag.id = posts_tags.tag_id
+GROUP BY post.id, author.id;
+
+SELECT to_tsvector('Try not to become a man of success, but rather try to become a man of value');
+
+select to_tsvector('If you can dream it, you can do it') @@ 'dream';
+
+SELECT pid, p_title
+FROM (SELECT post.id as pid,
+             post.title as p_title,
+             to_tsvector(post.title) || 
+             to_tsvector(post.content) ||
+             to_tsvector(author.name) ||
+             to_tsvector(coalesce(string_agg(tag.name, ' '))) as document
+      FROM post
+      JOIN author ON author.id = post.author_id
+      JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+      JOIN tag ON tag.id = posts_tags.tag_id
+      GROUP BY post.id, author.id) p_search
+WHERE p_search.document @@ to_tsquery('Endangered & Species');
+
+ALTER TABLE post ADD language text NOT NULL DEFAULT('english');
+
+SELECT to_tsvector(post.language::regconfig, post.title) || 
+       to_tsvector(post.language::regconfig, post.content) ||
+       to_tsvector('simple', author.name) ||
+       to_tsvector('simple', coalesce((string_agg(tag.name, ' ')), '')) as document
+FROM post
+JOIN author ON author.id = post.author_id
+JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+JOIN tag ON tag.id = posts_tags.tag_id
+GROUP BY post.id, author.id;
+
+SELECT to_tsvector('simple', 'We are running');
+
+
+CREATE EXTENSION unaccent;
+SELECT unaccent('èéêë');
+
+INSERT INTO post (id, title, content, author_id, language) 
+VALUES (4, 'il était une fois', 'il était une fois un hôtel ...', 2,'french');
+
+
+SELECT to_tsvector(post.language::regconfig, unaccent(post.title)) || 
+       to_tsvector(post.language::regconfig, unaccent(post.content)) ||
+       to_tsvector('simple', unaccent(author.name)) ||
+       to_tsvector('simple', unaccent(coalesce(string_agg(tag.name, ' ')))) as document
+FROM post
+JOIN author ON author.id = post.author_id
+JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+JOIN tag ON author.id = post.author_id
+GROUP BY post.id, author.id;
+
+
+CREATE TEXT SEARCH CONFIGURATION fr ( COPY = french );
+ALTER TEXT SEARCH CONFIGURATION fr ALTER MAPPING
+FOR hword, hword_part, word WITH unaccent, french_stem;
+
+SELECT to_tsvector('french', 'il était une fois');
+
+
+SELECT to_tsvector('french', unaccent('il était une fois'));
+
+
+
+SELECT to_tsvector(post.language::regconfig, post.title) || 
+       to_tsvector(post.language::regconfig, post.content) ||
+       to_tsvector('simple', author.name) ||
+       to_tsvector('simple', coalesce(string_agg(tag.name, ' ')))
+FROM post
+JOIN author ON author.id = post.author_id
+JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+JOIN tag ON author.id = post.author_id
+GROUP BY post.id, author.id;
+
+
+
+
+SELECT pid, p_title
+FROM (SELECT post.id as pid,
+             post.title as p_title,
+             setweight(to_tsvector(post.language::regconfig, post.title), 'A') || 
+             setweight(to_tsvector(post.language::regconfig, post.content), 'B') ||
+             setweight(to_tsvector('simple', author.name), 'C') ||
+             setweight(to_tsvector('simple', coalesce(string_agg(tag.name, ' '))), 'B') as document
+      FROM post
+      JOIN author ON author.id = post.author_id
+      JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+      JOIN tag ON tag.id = posts_tags.tag_id
+      GROUP BY post.id, author.id) p_search
+WHERE p_search.document @@ to_tsquery('english', 'Endangered & Species')
+ORDER BY ts_rank(p_search.document, to_tsquery('english', 'Endangered & Species')) DESC;
+
+
+SELECT ts_rank(to_tsvector('This is an example of document'), 
+               to_tsquery('example | document')) as relevancy;
+               
+CREATE OR REPLACE FUNCTION gin_fts_fct(title text, content text, language text) 
+  RETURNS tsvector
+AS
+$BODY$
+    SELECT setweight(to_tsvector($3::regconfig, $1), 'A') || setweight(to_tsvector($3::regconfig, $1), 'B');
+$BODY$
+LANGUAGE sql
+IMMUTABLE;
+
+CREATE INDEX idx_fts_post ON post  USING gin(gin_fts_fct(title, content, language));
+
+
+
+CREATE MATERIALIZED VIEW search_index AS 
+SELECT post.id,
+       post.title,
+       setweight(to_tsvector(post.language::regconfig, post.title), 'A') || 
+       setweight(to_tsvector(post.language::regconfig, post.content), 'B') ||
+       setweight(to_tsvector('simple', author.name), 'C') ||
+       setweight(to_tsvector('simple', coalesce(string_agg(tag.name, ' '))), 'A') as document
+FROM post
+JOIN author ON author.id = post.author_id
+JOIN posts_tags ON posts_tags.post_id = posts_tags.tag_id
+JOIN tag ON tag.id = posts_tags.tag_id
+GROUP BY post.id, author.id;
+
+CREATE INDEX idx_fts_search ON search_index USING gin(document);
+CREATE UNIQUE INDEX ON search_index (id);
+
+
+SELECT id as post_id, title
+FROM search_index
+WHERE document @@ to_tsquery('english', 'Endangered & Species')
+ORDER BY ts_rank(document, to_tsquery('english', 'Endangered & Species')) DESC;
+
+
+REFRESH MATERIALIZED VIEW CONCURRENTLY search_index;
