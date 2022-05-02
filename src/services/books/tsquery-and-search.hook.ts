@@ -17,13 +17,23 @@ export const updateTheTSVector = (options:any) => async (ctx:HookContext)=>{
   // ts_rank allows us to set importance on four levels: A > B > C > D.
   const fieldList = Object.keys(options.model).filter(k=>(options.model as any)[k].level && ['A','B','C','D'].includes((options.model as any)[k].level));
   // Our query is an update statement that maps each appropriate field to a vector and then merges all the vectors for storage
+  const { tableAttributes } = options.model;
+  const fieldList = Object.keys(tableAttributes).filter(
+    (field) => tableAttributes[field].level !== undefined
+  );
+
+  // const fieldList = [];
+  // Our query is an update statement that maps each appropriate field to a vector and then merges all the vectors for storage
+  const setLevel = fieldList
+    .map(
+      (field, idx) =>
+        `setweight(to_tsvector($${idx + 1}), '${tableAttributes[field].level}')`
+    )
+    .join('||');
+
   const query = `
-            UPDATE "${ctx.path}" SET "${options.searchColumn}" = (`+
-            fieldList.map((v,i)=>{
-              return `setweight(to_tsvector($${i+1}), '${(options.model as any)[v].level}')`;
-            }).join(' || ')
-            +`) WHERE "id"=${id} RETURNING ${options.searchColumn};
-            `;
+    UPDATE "${options.model.tableName}" SET "${options.searchColumn}" = (${setLevel})WHERE "id"=${id} RETURNING ${options.searchColumn};`;
+
         
   // we now await the query update and do a SQL-safe injection through the bind option in sequelize.  This replaces the $1 and $2 etc. in the UPDATE statement with the values from our input data.
   await sequelize.query(query,
